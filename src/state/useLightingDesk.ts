@@ -41,6 +41,16 @@ export type EditorAction =
   | { type: 'redo' };
 
 function normalizeWorkspace(workspace: Workspace) {
+  // 兼容早期草稿：控台分工上线前的提示默认归属主控台。
+  for (const plan of workspace.plans) {
+    for (const scene of plan.scenes) {
+      for (const cue of scene.cues) {
+        if (cue.console !== 'main' && cue.console !== 'backup') {
+          cue.console = 'main';
+        }
+      }
+    }
+  }
   recalculatePlans(workspace.plans);
   const active = workspace.plans.find((plan) => plan.id === workspace.activePlanId) ?? workspace.plans[0];
   if (!active) return workspace;

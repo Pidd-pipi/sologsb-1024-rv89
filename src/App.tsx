@@ -82,9 +82,11 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import {
   colorPresets,
+  consoleLabels,
   detectConflicts,
   roleLabels,
-  statusLabels
+  statusLabels,
+  summarizeConsoleAssignment
 } from './data';
 import {
   LIGHTING_STORAGE_KEY,
@@ -96,7 +98,7 @@ import {
   formatTime,
   useLightingDesk
 } from './state/useLightingDesk';
-import type { Cue, CueConflict, LightingPlan, Scene, UserRole, Workspace } from './types';
+import type { Cue, CueConflict, CueConsole, LightingPlan, Scene, UserRole, Workspace } from './types';
 
 const statusColors = {
   draft: 'orange',
@@ -104,13 +106,19 @@ const statusColors = {
   confirmed: 'green'
 } as const;
 
+const consoleColors: Record<CueConsole, 'blue' | 'purple'> = {
+  main: 'blue',
+  backup: 'purple'
+};
+
 function conflictLabel(conflict: CueConflict) {
   return {
     'channel-overlap': '通道叠光',
     'follow-order': '跟随关系',
     'missing-data': '数据缺失',
     'duplicate-position': '灯位重复',
-    duration: '时间异常'
+    duration: '时间异常',
+    'console-mismatch': '控台阻断'
   }[conflict.type];
 }
 
@@ -121,9 +129,10 @@ interface SortableCueRowProps {
   disabled: boolean;
   conflicts: CueConflict[];
   onSelect: () => void;
+  onAssignConsole: (console: CueConsole) => void;
 }
 
-function SortableCueRow({ cue, index, selected, disabled, conflicts, onSelect }: SortableCueRowProps) {
+function SortableCueRow({ cue, index, selected, disabled, conflicts, onSelect, onAssignConsole }: SortableCueRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: cue.id,
     disabled
@@ -132,6 +141,7 @@ function SortableCueRow({ cue, index, selected, disabled, conflicts, onSelect }:
     transform: CSS.Transform.toString(transform),
     transition
   };
+  const hasConsoleBlock = conflicts.some((item) => item.type === 'console-mismatch');
 
   return (
     <Box
@@ -139,7 +149,7 @@ function SortableCueRow({ cue, index, selected, disabled, conflicts, onSelect }:
       style={style}
       role="option"
       aria-selected={selected}
-      aria-label={`${cue.number} ${cue.label}，${statusLabels[cue.status]}，${conflicts.length} 个冲突`}
+      aria-label={`${cue.number} ${cue.label}，${statusLabels[cue.status]}，${consoleLabels[cue.console]}，${conflicts.length} 个冲突`}
       className={`cue-row ${selected ? 'active' : ''} ${isDragging ? 'dragging' : ''}`}
       borderBottomWidth="1px"
       borderColor="whiteAlpha.100"
@@ -187,6 +197,32 @@ function SortableCueRow({ cue, index, selected, disabled, conflicts, onSelect }:
         <Tag size="sm" colorScheme={statusColors[cue.status]} minW="62px" justifyContent="center">
           {statusLabels[cue.status]}
         </Tag>
+        <Tooltip
+          label={
+            disabled
+              ? `${consoleLabels[cue.console]}执行；冻结或无权限时不可调整`
+              : `${consoleLabels[cue.console]}执行，点击切换到${consoleLabels[cue.console === 'main' ? 'backup' : 'main']}`
+          }
+        >
+          <Tag
+            as="button"
+            type="button"
+            size="sm"
+            minW="68px"
+            justifyContent="center"
+            variant={hasConsoleBlock ? 'solid' : 'subtle'}
+            colorScheme={hasConsoleBlock ? 'red' : consoleColors[cue.console]}
+            outline={hasConsoleBlock ? '2px solid rgba(252,129,129,.7)' : undefined}
+            cursor={disabled ? 'default' : 'pointer'}
+            aria-label={`${cue.number} 执行控台：${consoleLabels[cue.console]}${disabled ? '，不可调整' : '，点击切换'}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!disabled) onAssignConsole(cue.console === 'main' ? 'backup' : 'main');
+            }}
+          >
+            {consoleLabels[cue.console]}
+          </Tag>
+        </Tooltip>
         <Tooltip label={conflicts.length ? conflicts.map((item) => item.message).join('；') : '无冲突'}>
           <Box color={conflicts.length ? (conflicts.some((item) => item.severity === 'error') ? 'red.300' : 'orange.300') : 'green.300'}>
             {conflicts.length ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}
@@ -204,9 +240,10 @@ interface CueListProps {
   conflicts: CueConflict[];
   onSelect: (cueId: string) => void;
   onReorder: (activeId: string, overId: string) => void;
+  onAssignConsole: (cueId: string, console: CueConsole) => void;
 }
 
-function CueList({ scene, selectedCueId, canEdit, conflicts, onSelect, onReorder }: CueListProps) {
+function CueList({ scene, selectedCueId, canEdit, conflicts, onSelect, onReorder, onAssignConsole }: CueListProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -231,6 +268,7 @@ function CueList({ scene, selectedCueId, canEdit, conflicts, onSelect, onReorder
               disabled={!canEdit}
               conflicts={conflicts.filter((item) => item.cueId === cue.id)}
               onSelect={() => onSelect(cue.id)}
+              onAssignConsole={(assigned) => onAssignConsole(cue.id, assigned)}
             />
           ))}
           {!scene.cues.length ? (
@@ -263,6 +301,14 @@ function CueInspector({ cue, scene, workspace, canEdit, conflicts, onApply, onDe
     setDraft(cue ? structuredClone(cue) : null);
   }, [cue?.id]);
 
+  // 行内徽标可直接切换执行控台；若检查器草稿尚未应用，同步控台字段，避免把外部分配覆盖回去。
+  useEffect(() => {
+    if (!draft || !cue || draft.id !== cue.id) return;
+    if (draft.console !== cue.console) {
+      setDraft((current) => (current ? { ...current, console: cue.console } : current));
+    }
+  }, [cue?.console]);
+
   if (!cue || !draft) {
     return (
       <Flex minH="360px" align="center" justify="center" color="whiteAlpha.500" textAlign="center">
@@ -286,6 +332,7 @@ function CueInspector({ cue, scene, workspace, canEdit, conflicts, onApply, onDe
           <Text color="whiteAlpha.500" fontSize="xs">开始 {formatTime(cue.startTime)} · 总时长 {cue.duration?.toFixed(1)}s</Text>
         </Box>
         <Spacer />
+        <Tag colorScheme={consoleColors[cue.console]} mr={2}>{consoleLabels[cue.console]}</Tag>
         <Tag colorScheme={statusColors[cue.status]}>{statusLabels[cue.status]}</Tag>
       </Flex>
 
@@ -378,6 +425,27 @@ function CueInspector({ cue, scene, workspace, canEdit, conflicts, onApply, onDe
           </FormControl>
         ))}
       </SimpleGrid>
+
+      <FormControl>
+        <FormLabel>执行控台</FormLabel>
+        <ButtonGroup isAttached variant="outline" width="100%">
+          {(['main', 'backup'] as const).map((assigned) => (
+            <Button
+              key={assigned}
+              flex="1"
+              colorScheme={draft.console === assigned ? consoleColors[assigned] : 'whiteAlpha'}
+              variant={draft.console === assigned ? 'solid' : 'outline'}
+              isDisabled={!canEdit}
+              onClick={() => update('console', assigned)}
+            >
+              {consoleLabels[assigned]}
+            </Button>
+          ))}
+        </ButtonGroup>
+        <Text mt={1} color="whiteAlpha.500" fontSize="11px">
+          彩排换班时按此控台执行；跟随目标或下游提示在另一控台时会列为阻断冲突，原分配保留，调回同一控台后恢复。
+        </Text>
+      </FormControl>
 
       <FormControl>
         <FormLabel htmlFor="cue-follow">跟随关系</FormLabel>
@@ -547,6 +615,7 @@ function ComparePlan({
                 <Text fontSize="xs" noOfLines={1}>{cue.label}</Text>
                 <Text color="whiteAlpha.500" fontSize="10px">{formatTime(cue.startTime)} · {cue.channel} · {cue.brightness}%</Text>
               </Box>
+              <Tag size="sm" variant="subtle" colorScheme={consoleColors[cue.console]}>{consoleLabels[cue.console]}</Tag>
               {active ? (
                 <IconButton aria-label={`选择 ${cue.number}`} size="xs" variant="ghost" icon={<ChevronRight size={14} />} onClick={() => onSelectCue(cue.id)} />
               ) : null}
@@ -686,9 +755,20 @@ export default function App() {
         followCueId: '',
         targetNote: '',
         notes: '',
-        status: 'draft'
+        status: 'draft',
+        console: 'main'
       });
       next.selectedCueId = id;
+    });
+  }
+
+  function assignCueConsole(cueId: string, assigned: CueConsole) {
+    commit(assigned === 'backup' ? '将提示分配到备份控台' : '将提示分配到主控台', (next) => {
+      const cue = next.plans
+        .find((plan) => plan.id === next.activePlanId)
+        ?.scenes.find((scene) => scene.id === next.selectedSceneId)
+        ?.cues.find((item) => item.id === cueId);
+      if (cue) cue.console = assigned;
     });
   }
 
@@ -805,6 +885,7 @@ export default function App() {
       exportedAt: new Date().toISOString(),
       plan: activePlan,
       conflicts: activeConflicts,
+      consoleAssignment: summarizeConsoleAssignment(activePlan),
       role: workspace.role
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' }));
@@ -908,6 +989,9 @@ export default function App() {
               <VStack align="stretch" spacing={2}>
                 {activePlan.scenes.map((scene) => {
                   const sceneConflicts = activeConflicts.filter((item) => item.sceneId === scene.id);
+                  const consoleBlocks = sceneConflicts.filter((item) => item.type === 'console-mismatch');
+                  const mainCount = scene.cues.filter((cue) => cue.console === 'main').length;
+                  const backupCount = scene.cues.length - mainCount;
                   const selected = scene.id === activeScene?.id;
                   return (
                     <Box
@@ -930,7 +1014,10 @@ export default function App() {
                       <Flex mt={2} color="whiteAlpha.500" fontSize="10px" gap={2}>
                         <Text>{formatTime(scene.duration)}</Text>
                         <Text>{scene.cues.length} 条</Text>
+                        <Text color="blue.300">主 {mainCount}</Text>
+                        <Text color="purple.300">备 {backupCount}</Text>
                         <Text color={sceneConflicts.length ? 'orange.300' : 'green.300'}>{sceneConflicts.length} 冲突</Text>
+                        {consoleBlocks.length ? <Text color="red.300">{consoleBlocks.length} 控台阻断</Text> : null}
                       </Flex>
                     </Box>
                   );
@@ -1005,7 +1092,7 @@ export default function App() {
                   </Flex>
                   <Flex className="timeline-track" role="list" aria-label={`${activeScene.name}时间轴`}>
                     {activeScene.cues.map((cue) => (
-                      <Tooltip key={cue.id} label={`${cue.number} ${cue.label}，${formatTime(cue.startTime)} 开始，持续 ${cue.duration?.toFixed(1)} 秒`}>
+                      <Tooltip key={cue.id} label={`${cue.number} ${cue.label}，${consoleLabels[cue.console]}执行，${formatTime(cue.startTime)} 开始，持续 ${cue.duration?.toFixed(1)} 秒`}>
                         <Box
                           as="button"
                           role="listitem"
@@ -1033,8 +1120,8 @@ export default function App() {
                   <AlertIcon />
                   <AlertDescription>
                     {activeScene.frozen
-                      ? '该场次已冻结。提示顺序与参数保持只读；可由灯光设计或舞台监督解除冻结。'
-                      : '当前角色处于审阅或执行权限，拖动顺序与参数编辑已锁定。'}
+                      ? '该场次已冻结。提示顺序、参数与控台分工保持只读；可由灯光设计或舞台监督解除冻结。'
+                      : '当前角色处于审阅或执行权限，拖动顺序、参数与控台分工已锁定。'}
                   </AlertDescription>
                 </Alert>
               ) : null}
@@ -1046,6 +1133,7 @@ export default function App() {
                 conflicts={activeConflicts}
                 onSelect={(cueId) => selectCue(activeScene.id, cueId)}
                 onReorder={reorderCue}
+                onAssignConsole={assignCueConsole}
               />
 
               <Box borderWidth="1px" borderColor="whiteAlpha.100" borderRadius="xl" bg="whiteAlpha.50" p={4}>
@@ -1103,19 +1191,28 @@ export default function App() {
                     <VStack align="stretch" spacing={3}>
                       {activeScene.cues.map((cue, index) => {
                         const followed = activeScene.cues.find((item) => item.id === cue.followCueId);
+                        const crossConsole = Boolean(followed && followed.console !== cue.console);
                         return (
-                          <Box key={cue.id} p={3} borderRadius="lg" bg="blackAlpha.200" borderWidth="1px" borderColor="whiteAlpha.100">
+                          <Box key={cue.id} p={3} borderRadius="lg" bg="blackAlpha.200" borderWidth="1px" borderColor={crossConsole ? 'red.600' : 'whiteAlpha.100'}>
                             <Flex align="center" gap={2}>
                               <CircleDot size={14} color={cue.colorHex} />
                               <Text fontFamily="mono" color="amber.300" fontSize="sm">{cue.number}</Text>
                               <Text fontWeight="600" fontSize="sm" noOfLines={1}>{cue.label}</Text>
+                              <Tag size="sm" variant="subtle" colorScheme={consoleColors[cue.console]}>{consoleLabels[cue.console]}</Tag>
                               <Spacer />
                               <Text color="whiteAlpha.500" fontSize="xs">{formatTime(cue.startTime)}</Text>
                             </Flex>
-                            <Box ml={4} mt={3} borderLeftWidth="2px" borderColor={followed ? 'purple.400' : 'whiteAlpha.200'} pl={3}>
+                            <Box ml={4} mt={3} borderLeftWidth="2px" borderColor={followed ? (crossConsole ? 'red.400' : 'purple.400') : 'whiteAlpha.200'} pl={3}>
                               {followed ? (
                                 <>
-                                  <Flex align="center" gap={1} color="purple.300" fontSize="xs"><ArrowDown size={12} />跟随 {followed.number} · {followed.label}</Flex>
+                                  <Flex align="center" gap={1} color={crossConsole ? 'red.300' : 'purple.300'} fontSize="xs">
+                                    <ArrowDown size={12} />跟随 {followed.number} · {followed.label}
+                                    {crossConsole ? (
+                                      <Tag size="sm" colorScheme="red" variant="solid">跨控台阻断</Tag>
+                                    ) : (
+                                      <Tag size="sm" variant="subtle" colorScheme={consoleColors[followed.console]}>{consoleLabels[followed.console]}</Tag>
+                                    )}
+                                  </Flex>
                                   <Text mt={1} color="whiteAlpha.500" fontSize="10px">目标结束时间 {formatTime(followed.endTime)}</Text>
                                 </>
                               ) : (

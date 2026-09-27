@@ -1,6 +1,7 @@
 export type CueStatus = 'draft' | 'ready' | 'confirmed';
 export type UserRole = 'designer' | 'programmer' | 'stage-manager' | 'readonly';
 export type ConflictSeverity = 'error' | 'warning';
+export type CueConsole = 'main' | 'backup';
 
 export interface Cue {
   id: string;
@@ -18,6 +19,7 @@ export interface Cue {
   targetNote: string;
   notes: string;
   status: CueStatus;
+  console: CueConsole;
   startTime?: number;
   duration?: number;
   endTime?: number;
@@ -47,7 +49,13 @@ export interface CueConflict {
   cueId: string;
   sceneId: string;
   severity: ConflictSeverity;
-  type: 'channel-overlap' | 'follow-order' | 'missing-data' | 'duplicate-position' | 'duration';
+  type:
+    | 'channel-overlap'
+    | 'follow-order'
+    | 'missing-data'
+    | 'duplicate-position'
+    | 'duration'
+    | 'console-mismatch';
   message: string;
 }
 

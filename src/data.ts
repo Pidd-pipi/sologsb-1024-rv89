@@ -1,4 +1,4 @@
-import type { Cue, CueConflict, LightingPlan, Scene, UserRole } from './types';
+import type { Cue, CueConflict, CueConsole, LightingPlan, Scene, UserRole } from './types';
 
 const FIXED_TIME = '2026-09-25T02:00:00.000Z';
 
@@ -7,6 +7,11 @@ export const roleLabels: Record<UserRole, string> = {
   programmer: '编程执行',
   'stage-manager': '舞台监督',
   readonly: '只读查看'
+};
+
+export const consoleLabels: Record<CueConsole, string> = {
+  main: '主控台',
+  backup: '备份控台'
 };
 
 export const statusLabels = {
@@ -43,7 +48,8 @@ function cue(
   followCueId = '',
   targetNote = '',
   notes = '',
-  status: Cue['status'] = 'ready'
+  status: Cue['status'] = 'ready',
+  console: Cue['console'] = 'main'
 ): Cue {
   cueSequence += 1;
   return {
@@ -61,7 +67,8 @@ function cue(
     followCueId,
     targetNote,
     notes,
-    status
+    status,
+    console
   };
 }
 
@@ -77,25 +84,25 @@ const mainPlan: LightingPlan = {
   scenes: [
     scene('scene-1', '序章 · 入梦', 1, false, [
       cue('Q1', '观众席暗场', '全台', 'Grand Master', '黑场', '#000000', 0, 4, 6, 3, '', '场灯降至 10%', '开演提示与场灯联动。', 'confirmed'),
-      cue('Q2', '月幕初升', '天幕', 'Cyc 1', '深蓝', '#1D4ED8', 62, 8, 18, 6, 'cue-1', '月幕形成冷色底', '天幕均匀，避免中心热斑。'),
-      cue('Q3', '人物侧光', '左前区', 'FOH L 3', '暖白', '#FFF1C7', 74, 2.5, 22, 5, 'cue-2', '演员入画', '为独白人物补面，保留右侧阴影。', 'ready'),
+      cue('Q2', '月幕初升', '天幕', 'Cyc 1', '深蓝', '#1D4ED8', 62, 8, 18, 6, 'cue-1', '月幕形成冷色底', '天幕均匀，避免中心热斑。', 'ready', 'backup'),
+      cue('Q3', '人物侧光', '左前区', 'FOH L 3', '暖白', '#FFF1C7', 74, 2.5, 22, 5, 'cue-2', '演员入画', '为独白人物补面，保留右侧阴影。', 'ready', 'backup'),
       cue('Q4', '雾门显现', '后区', 'Beam 2', '天青', '#0EA5E9', 58, 5, 12, 8, '', '雾机启动后可见', '通道尚未实测。', 'draft')
     ]),
     scene('scene-2', '独白 · 失语', 2, false, [
       cue('Q10', '独白收束', '前区', 'FOH 1-4', '琥珀', '#F59E0B', 46, 7, 32, 9, '', '演员坐于长椅', '压低背景，仅保留边光。'),
       cue('Q11', '呼吸变化', '前区', 'FOH L 3', '暖白', '#FFF1C7', 72, 3, 8, 3, 'cue-5', '吸气点触发', '与台词“我听见”同步。', 'ready'),
-      cue('Q12', '影子分裂', '侧幕', 'Side 5', '品红', '#D946EF', 54, 2, 15, 7, 'cue-11', '两次呼吸后', '需要检查侧幕遮挡。', 'draft'),
+      cue('Q12', '影子分裂', '侧幕', 'Side 5', '品红', '#D946EF', 54, 2, 15, 7, 'cue-11', '两次呼吸后', '需要检查侧幕遮挡。', 'draft', 'backup'),
       cue('Q13', '冷色侵入', '全台', 'Grand Master', '深蓝', '#1D4ED8', 38, 10, 24, 12, '', '音乐低频进入', '与 Q12 通道存在叠光风险。')
     ]),
     scene('scene-3', '群舞 · 潮汐', 3, false, [
       cue('Q20', '群舞起光', '后区', 'Dance 1-6', '松绿', '#059669', 68, 2, 18, 4, '', '第一组舞者进入', '两侧亮度需平衡。', 'ready'),
       cue('Q21', '潮线推移', '侧区', 'Side 1-4', '天青', '#0EA5E9', 60, 5, 16, 5, 'cue-9', '第二组越过中线', '跟随舞者视线。'),
-      cue('Q22', '高点爆闪', '全台', 'Grand Master', '暖白', '#FFF1C7', 92, 0.3, 0.8, 8, 'cue-10', '定音鼓重音', '确认频闪安全。', 'draft'),
+      cue('Q22', '高点爆闪', '全台', 'Grand Master', '暖白', '#FFF1C7', 92, 0.3, 0.8, 8, 'cue-10', '定音鼓重音', '确认频闪安全。', 'draft', 'backup'),
       cue('Q23', '潮退', '后区', 'Dance 1-6', '深蓝', '#1D4ED8', 26, 12, 28, 14, '', '音乐进入尾奏', '')
     ]),
     scene('scene-4', '终场 · 归岸', 4, true, [
       cue('Q30', '归岸定点', '前区', 'FOH 1-2', '暖白', '#FFF1C7', 48, 8, 26, 10, '', '演员回到长椅', '已与导演确认。', 'confirmed'),
-      cue('Q31', '星空落幕', '天幕', 'Cyc 2', '薰衣草', '#8B5CF6', 34, 6, 36, 16, 'cue-12', '演员抬头后', '冻结场次，保留最终状态。', 'confirmed')
+      cue('Q31', '星空落幕', '天幕', 'Cyc 2', '薰衣草', '#8B5CF6', 34, 6, 36, 16, 'cue-12', '演员抬头后', '冻结场次，保留最终状态。', 'confirmed', 'backup')
     ])
   ]
 };
@@ -197,16 +204,40 @@ export function detectConflicts(plans: LightingPlan[]): CueConflict[] {
             type: 'follow-order',
             message: `${item.number} 的跟随提示不存在于当前场次`
           });
-        } else if ((followed.startTime ?? 0) >= (item.startTime ?? 0)) {
-          conflicts.push({
-            id: `${plan.id}-${scene.id}-${item.id}-follow-order`,
-            planId: plan.id,
-            sceneId: scene.id,
-            cueId: item.id,
-            severity: 'warning',
-            type: 'follow-order',
-            message: `${item.number} 的跟随目标不在其之前完成`
-          });
+        } else {
+          if ((followed.startTime ?? 0) >= (item.startTime ?? 0)) {
+            conflicts.push({
+              id: `${plan.id}-${scene.id}-${item.id}-follow-order`,
+              planId: plan.id,
+              sceneId: scene.id,
+              cueId: item.id,
+              severity: 'warning',
+              type: 'follow-order',
+              message: `${item.number} 的跟随目标不在其之前完成`
+            });
+          }
+          // 跟随链两端必须落在同一执行控台，否则彩排换班时接手方无法在一条链上跟光。
+          // 只报告、不改写原分配：调回同一控台后冲突自然消失。
+          if (followed.console !== item.console) {
+            conflicts.push({
+              id: `${plan.id}-${scene.id}-${item.id}-console-target`,
+              planId: plan.id,
+              sceneId: scene.id,
+              cueId: item.id,
+              severity: 'error',
+              type: 'console-mismatch',
+              message: `${item.number}（${consoleLabels[item.console]}）的跟随目标 ${followed.number} 在${consoleLabels[followed.console]}，跟随链跨控台，执行已阻断；请调回同一控台`
+            });
+            conflicts.push({
+              id: `${plan.id}-${scene.id}-${item.id}-console-downstream`,
+              planId: plan.id,
+              sceneId: scene.id,
+              cueId: followed.id,
+              severity: 'error',
+              type: 'console-mismatch',
+              message: `${followed.number}（${consoleLabels[followed.console]}）的下游提示 ${item.number} 在${consoleLabels[item.console]}，跟随链跨控台，执行已阻断；请调回同一控台`
+            });
+          }
         }
       }
 
@@ -244,4 +275,57 @@ export function detectConflicts(plans: LightingPlan[]): CueConflict[] {
     }
   }
   return conflicts;
+}
+
+export interface ConsoleSceneSummary {
+  sceneId: string;
+  sceneName: string;
+  main: number;
+  backup: number;
+  blockingFollowLinks: {
+    cueNumber: string;
+    cueLabel: string;
+    cueConsole: CueConsole;
+    targetNumber: string;
+    targetConsole: CueConsole;
+  }[];
+}
+
+export interface ConsoleAssignmentSummary {
+  planId: string;
+  planName: string;
+  scenes: ConsoleSceneSummary[];
+}
+
+export function summarizeConsoleAssignment(plan: LightingPlan): ConsoleAssignmentSummary {
+  return {
+    planId: plan.id,
+    planName: plan.name,
+    scenes: [...plan.scenes]
+      .sort((a, b) => a.order - b.order)
+      .map((scene) => {
+        const byId = new Map(scene.cues.map((cue) => [cue.id, cue]));
+        return {
+          sceneId: scene.id,
+          sceneName: scene.name,
+          main: scene.cues.filter((cue) => cue.console === 'main').length,
+          backup: scene.cues.filter((cue) => cue.console === 'backup').length,
+          blockingFollowLinks: scene.cues
+            .filter((cue) => {
+              const target = cue.followCueId ? byId.get(cue.followCueId) : undefined;
+              return target && target.console !== cue.console;
+            })
+            .map((cue) => {
+              const target = byId.get(cue.followCueId as string) as Cue;
+              return {
+                cueNumber: cue.number,
+                cueLabel: cue.label,
+                cueConsole: cue.console,
+                targetNumber: target.number,
+                targetConsole: target.console
+              };
+            })
+        };
+      })
+  };
 }
