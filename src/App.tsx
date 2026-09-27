@@ -82,6 +82,8 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import {
   colorPresets,
+  consoleLabels,
+  consoleShortLabels,
   detectConflicts,
   roleLabels,
   statusLabels
@@ -110,9 +112,12 @@ function conflictLabel(conflict: CueConflict) {
     'follow-order': '跟随关系',
     'missing-data': '数据缺失',
     'duplicate-position': '灯位重复',
-    duration: '时间异常'
+    duration: '时间异常',
+    'console-split': '控台冲突'
   }[conflict.type];
 }
+
+const consoleColors = { main: 'blue', backup: 'teal' } as const;
 
 interface SortableCueRowProps {
   cue: Cue;
@@ -139,7 +144,7 @@ function SortableCueRow({ cue, index, selected, disabled, conflicts, onSelect }:
       style={style}
       role="option"
       aria-selected={selected}
-      aria-label={`${cue.number} ${cue.label}，${statusLabels[cue.status]}，${conflicts.length} 个冲突`}
+      aria-label={`${cue.number} ${cue.label}，${statusLabels[cue.status]}，${consoleLabels[cue.console]}执行，${conflicts.length} 个冲突`}
       className={`cue-row ${selected ? 'active' : ''} ${isDragging ? 'dragging' : ''}`}
       borderBottomWidth="1px"
       borderColor="whiteAlpha.100"
@@ -171,6 +176,7 @@ function SortableCueRow({ cue, index, selected, disabled, conflicts, onSelect }:
           <Flex align="center" gap={2}>
             <Text fontWeight="650" noOfLines={1}>{cue.label}</Text>
             {cue.followCueId ? <Tag size="sm" variant="subtle" colorScheme="purple">跟随</Tag> : null}
+            <Tag size="sm" variant="subtle" colorScheme={consoleColors[cue.console]}>{consoleShortLabels[cue.console]}</Tag>
           </Flex>
           <Text color="whiteAlpha.500" fontSize="xs" noOfLines={1}>
             {cue.position} · {cue.channel} · {cue.color}
@@ -393,6 +399,27 @@ function CueInspector({ cue, scene, workspace, canEdit, conflicts, onApply, onDe
           ))}
         </Select>
         <Text mt={1} color="whiteAlpha.500" fontSize="11px">跟随目标结束后触发；时间会在拖拽或参数变化后自动重算。</Text>
+      </FormControl>
+
+      <FormControl>
+        <FormLabel>执行控台</FormLabel>
+        <ButtonGroup isAttached variant="outline" width="100%">
+          {(['main', 'backup'] as const).map((consoleId) => (
+            <Button
+              key={consoleId}
+              flex="1"
+              colorScheme={draft.console === consoleId ? consoleColors[consoleId] : 'whiteAlpha'}
+              variant={draft.console === consoleId ? 'solid' : 'outline'}
+              isDisabled={!canEdit}
+              onClick={() => update('console', consoleId)}
+            >
+              {consoleLabels[consoleId]}
+            </Button>
+          ))}
+        </ButtonGroup>
+        <Text mt={1} color="whiteAlpha.500" fontSize="11px">
+          换班交接以控台分工为准；与跟随目标或下游提示分属不同控台时会列为阻断冲突，调回同一控台后恢复可执行。
+        </Text>
       </FormControl>
 
       <FormControl>
@@ -686,7 +713,8 @@ export default function App() {
         followCueId: '',
         targetNote: '',
         notes: '',
-        status: 'draft'
+        status: 'draft',
+        console: 'main'
       });
       next.selectedCueId = id;
     });
@@ -804,6 +832,19 @@ export default function App() {
     const payload = {
       exportedAt: new Date().toISOString(),
       plan: activePlan,
+      consoleAssignments: activePlan.scenes.map((scene) => ({
+        sceneId: scene.id,
+        scene: scene.name,
+        main: scene.cues.filter((cue) => cue.console === 'main').map((cue) => cue.number),
+        backup: scene.cues.filter((cue) => cue.console === 'backup').map((cue) => cue.number),
+        cues: scene.cues.map((cue) => ({
+          cueId: cue.id,
+          number: cue.number,
+          label: cue.label,
+          console: cue.console,
+          consoleLabel: consoleLabels[cue.console]
+        }))
+      })),
       conflicts: activeConflicts,
       role: workspace.role
     };
@@ -1005,16 +1046,17 @@ export default function App() {
                   </Flex>
                   <Flex className="timeline-track" role="list" aria-label={`${activeScene.name}时间轴`}>
                     {activeScene.cues.map((cue) => (
-                      <Tooltip key={cue.id} label={`${cue.number} ${cue.label}，${formatTime(cue.startTime)} 开始，持续 ${cue.duration?.toFixed(1)} 秒`}>
+                      <Tooltip key={cue.id} label={`${cue.number} ${cue.label}，${formatTime(cue.startTime)} 开始，持续 ${cue.duration?.toFixed(1)} 秒，${consoleLabels[cue.console]}执行`}>
                         <Box
                           as="button"
                           role="listitem"
                           className="timeline-block focus-ring"
-                          aria-label={`时间轴 ${cue.number} ${cue.label}`}
+                          aria-label={`时间轴 ${cue.number} ${cue.label}，${consoleLabels[cue.console]}`}
                           bg={cue.colorHex}
                           color={cue.brightness > 55 ? '#111827' : '#fff'}
                           flexGrow={Math.max(1, cue.duration ?? 1)}
                           flexBasis={`${Math.max(40, (cue.duration ?? 1) * 14)}px`}
+                          borderTop={cue.console === 'main' ? '3px solid #60a5fa' : '3px solid #4fd1c5'}
                           borderLeft={cue.id === selectedCue?.id ? '3px solid #f6c453' : undefined}
                           onClick={() => selectCue(activeScene.id, cue.id)}
                         >
@@ -1103,20 +1145,25 @@ export default function App() {
                     <VStack align="stretch" spacing={3}>
                       {activeScene.cues.map((cue, index) => {
                         const followed = activeScene.cues.find((item) => item.id === cue.followCueId);
+                        const consoleSplit = Boolean(followed && followed.console !== cue.console);
                         return (
-                          <Box key={cue.id} p={3} borderRadius="lg" bg="blackAlpha.200" borderWidth="1px" borderColor="whiteAlpha.100">
+                          <Box key={cue.id} p={3} borderRadius="lg" bg="blackAlpha.200" borderWidth="1px" borderColor={consoleSplit ? 'red.600' : 'whiteAlpha.100'}>
                             <Flex align="center" gap={2}>
                               <CircleDot size={14} color={cue.colorHex} />
                               <Text fontFamily="mono" color="amber.300" fontSize="sm">{cue.number}</Text>
                               <Text fontWeight="600" fontSize="sm" noOfLines={1}>{cue.label}</Text>
+                              <Tag size="sm" variant="subtle" colorScheme={consoleColors[cue.console]}>{consoleShortLabels[cue.console]}</Tag>
                               <Spacer />
                               <Text color="whiteAlpha.500" fontSize="xs">{formatTime(cue.startTime)}</Text>
                             </Flex>
-                            <Box ml={4} mt={3} borderLeftWidth="2px" borderColor={followed ? 'purple.400' : 'whiteAlpha.200'} pl={3}>
+                            <Box ml={4} mt={3} borderLeftWidth="2px" borderColor={consoleSplit ? 'red.400' : followed ? 'purple.400' : 'whiteAlpha.200'} pl={3}>
                               {followed ? (
                                 <>
-                                  <Flex align="center" gap={1} color="purple.300" fontSize="xs"><ArrowDown size={12} />跟随 {followed.number} · {followed.label}</Flex>
+                                  <Flex align="center" gap={1} color="purple.300" fontSize="xs"><ArrowDown size={12} />跟随 {followed.number} · {followed.label}（{consoleShortLabels[followed.console]}）</Flex>
                                   <Text mt={1} color="whiteAlpha.500" fontSize="10px">目标结束时间 {formatTime(followed.endTime)}</Text>
+                                  {consoleSplit ? (
+                                    <Text mt={1} color="red.300" fontSize="10px">跨控台跟随链：调回同一控台后恢复可执行</Text>
+                                  ) : null}
                                 </>
                               ) : (
                                 <Flex align="center" gap={1} color="whiteAlpha.500" fontSize="xs"><Pause size={12} />按前一条结束或手动 GO 触发</Flex>
